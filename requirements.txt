@@ -1,0 +1,12 @@
+flask>=3.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Parent project dependencies (agent)
+boto3>=1.34.0
+strands-agents>=1.16.0
+structlog>=24.1.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+pymongo>=4.15.4
+dnspython>=2.8.0
