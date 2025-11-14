@@ -14,15 +14,28 @@ from dotenv import load_dotenv
 # Add parent directory to path to import agent
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from google_search_agent_mongodb import GoogleSearchAgent
+from guardrails import validator, init_bedrock_guardrails, bedrock_guardrails
+import structlog
 
 # Load environment variables
 load_dotenv()
+
+# Setup logging
+log = structlog.get_logger()
 
 app = Flask(__name__)
 
 # Initialize UIT agent
 agent = GoogleSearchAgent()
 print("✓ UIT MongoDB Agent initialized for Zalo Bot")
+
+# Initialize guardrails (hybrid: custom Python + AWS Bedrock)
+guardrail_id = os.getenv('BEDROCK_GUARDRAIL_ID')
+init_bedrock_guardrails(guardrail_id)
+if guardrail_id:
+    print(f"✓ Hybrid Guardrails enabled (Custom Python + AWS Bedrock {guardrail_id})")
+else:
+    print("✓ Custom Python Guardrails enabled (AWS Bedrock disabled - set BEDROCK_GUARDRAIL_ID to enable)")
 
 # Zalo webhook configuration
 ZALO_SECRET = os.getenv('ZALO_SECRET_KEY', '')
@@ -136,15 +149,44 @@ def handle_text_message(payload):
             print(f"⚠️ Empty message, returning OK")
             return jsonify({'status': 'ok'}), 200
         
+        # 1. Validate input with custom Python guardrails
+        is_valid, error_msg = validator.validate_input(user_id, text)
+        if not is_valid:
+            log.warning("Input validation failed", user_id=user_id, reason=error_msg)
+            send_zalo_message(user_id, error_msg)
+            return jsonify({'status': 'ok', 'guardrail': 'input_blocked'}), 200
+        
+        # 2. Apply AWS Bedrock Guardrails (if enabled)
+        if bedrock_guardrails and bedrock_guardrails.enabled:
+            is_safe, filtered_msg, intervention = bedrock_guardrails.apply_guardrails(
+                agent.bedrock_client,
+                agent.model_id,
+                text
+            )
+            if not is_safe:
+                log.warning("Bedrock guardrails blocked", user_id=user_id, intervention=intervention)
+                send_zalo_message(user_id, filtered_msg)
+                return jsonify({'status': 'ok', 'guardrail': 'bedrock_blocked'}), 200
+        
         # Query the agent
         print(f"🤖 Querying agent with: {text}")
         response = agent.chat(text)
         
         print(f"✓ Agent response ({len(response)} chars): {response[:200]}...")
         
+        # 3. Validate output before sending
+        is_valid, cleaned_response = validator.validate_output(response)
+        if not is_valid:
+            log.warning("Output validation failed", user_id=user_id)
+        
+        # 4. Check for PII in response (log for monitoring)
+        pii_detected = validator.detect_pii(cleaned_response)
+        if pii_detected:
+            log.warning("PII detected and redacted in response", user_id=user_id, pii_types=pii_detected)
+        
         # Send response back to Zalo
-        print(f"📤 Sending response to user {user_id}")
-        send_zalo_message(user_id, response)
+        print(f"📤 Sending response to user {user_id} (validated)")
+        send_zalo_message(user_id, cleaned_response)
         
         print(f"✅ Message handled successfully")
         return jsonify({'status': 'ok'}), 200
