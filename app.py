@@ -1,5 +1,5 @@
 """
-Zalo Bot Webhook Handler for UIT Knowledge Base Agent
+Zalo Bot Webhook Handler for UEH (University of Economics Ho Chi Minh City) Knowledge Base Agent
 Integrates with MongoDB-powered agent for Vietnamese queries
 """
 
@@ -25,17 +25,17 @@ log = structlog.get_logger()
 
 app = Flask(__name__)
 
-# Initialize UIT agent
+# Initialize UEH agent
 agent = GoogleSearchAgent()
-print("✓ UIT MongoDB Agent initialized for Zalo Bot")
+print("UEH MongoDB Agent initialized for Zalo Bot")
 
 # Initialize guardrails (hybrid: custom Python + AWS Bedrock)
 guardrail_id = os.getenv('BEDROCK_GUARDRAIL_ID')
 init_bedrock_guardrails(guardrail_id)
 if guardrail_id:
-    print(f"✓ Hybrid Guardrails enabled (Custom Python + AWS Bedrock {guardrail_id})")
+    print(f"Hybrid Guardrails enabled (Custom Python + AWS Bedrock {guardrail_id})")
 else:
-    print("✓ Custom Python Guardrails enabled (AWS Bedrock disabled - set BEDROCK_GUARDRAIL_ID to enable)")
+    print("Custom Python Guardrails enabled (AWS Bedrock disabled - set BEDROCK_GUARDRAIL_ID to enable)")
 
 # Zalo webhook configuration
 ZALO_SECRET = os.getenv('ZALO_SECRET_KEY', '')
@@ -47,7 +47,7 @@ def verify_zalo_signature(secret_token: str) -> bool:
     Zalo sends the secret_token in X-Secret-Token header
     """
     if not ZALO_SECRET:
-        print("⚠️ Warning: ZALO_SECRET not configured, skipping verification")
+        print("Warning: ZALO_SECRET not configured, skipping verification")
         return True  # Skip verification in dev mode
     
     # For Zalo Bot API (zapps.me), verify the secret token directly
@@ -67,10 +67,10 @@ def webhook_verify():
     
     # Verify token matches
     if mode == 'subscribe' and token == ZALO_ACCESS_TOKEN:
-        print(f"✓ Webhook verified: {challenge}")
+        print(f"Webhook verified: {challenge}")
         return challenge, 200
     else:
-        print("❌ Webhook verification failed")
+        print("Webhook verification failed")
         return 'Forbidden', 403
 
 
@@ -88,10 +88,10 @@ def webhook_handler():
         
         # Verify secret token
         if not verify_zalo_signature(secret_token):
-            print(f"❌ Invalid signature. Received token: '{secret_token}' Expected: '{ZALO_SECRET}'")
+            print(f"Invalid signature. Received token: '{secret_token}' Expected: '{ZALO_SECRET}'")
             return jsonify({'error': 'Invalid signature'}), 403
         
-        print(f"✓ Secret token verified")
+        print(f"Secret token verified")
         
         # Parse JSON payload
         payload = request.get_json()
@@ -107,11 +107,11 @@ def webhook_handler():
         elif event_name == 'message.link.received' or event_name == 'user_send_link':
             return handle_link_message(payload)
         else:
-            print(f"⚠️ Unhandled event type: {event_name}")
+            print(f"Unhandled event type: {event_name}")
             return jsonify({'status': 'ok'}), 200
             
     except Exception as e:
-        print(f"❌ Error handling webhook: {e}")
+        print(f"Error handling webhook: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -120,12 +120,12 @@ def webhook_handler():
 def handle_text_message(payload):
     """
     Handle text messages from users
-    Query the UIT agent and send response back
+    Query the UEH agent and send response back
     """
     user_id = None
     try:
         # Extract message details
-        print(f"🔍 Processing payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+        print(f"Processing payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
         
         # Handle both old and new payload formats
         message = payload.get('message', {})
@@ -146,7 +146,7 @@ def handle_text_message(payload):
         
         # Check if empty message
         if not text.strip():
-            print(f"⚠️ Empty message, returning OK")
+            print(f"Empty message, returning OK")
             return jsonify({'status': 'ok'}), 200
         
         # 1. Validate input with custom Python guardrails
@@ -169,10 +169,10 @@ def handle_text_message(payload):
                 return jsonify({'status': 'ok', 'guardrail': 'bedrock_blocked'}), 200
         
         # Query the agent
-        print(f"🤖 Querying agent with: {text}")
+        print(f"Querying agent with: {text}")
         response = agent.chat(text)
         
-        print(f"✓ Agent response ({len(response)} chars): {response[:200]}...")
+        print(f"Agent response ({len(response)} chars): {response[:200]}...")
         
         # 3. Validate output before sending
         is_valid, cleaned_response = validator.validate_output(response)
@@ -192,7 +192,7 @@ def handle_text_message(payload):
         return jsonify({'status': 'ok'}), 200
         
     except Exception as e:
-        print(f"❌ Error handling text message: {e}")
+        print(f"Error handling text message: {e}")
         import traceback
         traceback.print_exc()
         # Send error message to user
@@ -201,7 +201,7 @@ def handle_text_message(payload):
                 error_msg = "Xin lỗi, tôi gặp lỗi khi xử lý tin nhắn của bạn. Vui lòng thử lại sau."
                 send_zalo_message(user_id, error_msg)
         except Exception as e2:
-            print(f"❌ Failed to send error message: {e2}")
+            print(f"Failed to send error message: {e2}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -280,13 +280,13 @@ def send_zalo_message(user_id: str, message: str):
             if response.status_code == 200:
                 result = response.json()
                 if result.get('ok'):
-                    print(f"✓ Sent message to user {user_id}")
+                    print(f"Sent message to user {user_id}")
                 else:
-                    print(f"❌ API returned ok=false: {result}")
+                    print(f"API returned ok=false: {result}")
             else:
-                print(f"❌ Failed to send message: {response.status_code} - {response.text}")
+                print(f"Failed to send message: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"❌ Error sending message: {e}")
+            print(f"Error sending message: {e}")
             import traceback
             traceback.print_exc()
 
@@ -301,7 +301,7 @@ def health_check():
     
     return jsonify({
         'status': 'healthy',
-        'agent': 'UIT MongoDB Agent',
+        'agent': 'UEH MongoDB Agent',
         'mongodb': mongodb_status,
         'aws_profile': os.getenv('AWS_PROFILE', 'default'),
         'aws_region': os.getenv('AWS_REGION', 'us-west-2')
@@ -315,14 +315,14 @@ def index():
     """
     return """
     <html>
-    <head><title>UIT Zalo Bot</title></head>
+    <head><title>UEH Zalo Bot</title></head>
     <body>
-        <h1>🤖 UIT Knowledge Base - Zalo Bot</h1>
+        <h1>UEH Knowledge Base - Zalo Bot</h1>
         <p>Webhook server is running!</p>
         <ul>
-            <li><b>Agent:</b> MongoDB-powered UIT admission assistant</li>
+            <li><b>Agent:</b> MongoDB-powered UEH information assistant</li>
             <li><b>Language:</b> Vietnamese</li>
-            <li><b>Database:</b> 95 UIT admission documents</li>
+            <li><b>Database:</b> UEH university information</li>
         </ul>
         <h3>Endpoints:</h3>
         <ul>
@@ -341,7 +341,7 @@ if __name__ == '__main__':
     debug = os.getenv('DEBUG', 'False').lower() == 'true'
     
     print("\n" + "=" * 60)
-    print("🤖 UIT Zalo Bot - Starting")
+    print("UEH Zalo Bot - Starting")
     print("=" * 60)
     print(f"Port: {port}")
     print(f"Debug: {debug}")

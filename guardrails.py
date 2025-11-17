@@ -15,7 +15,7 @@ log = structlog.get_logger()
 # Rate limiting storage (in-memory, per user)
 USER_RATE_LIMITS = defaultdict(list)
 RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX_REQUESTS = 5  # max requests per window
+RATE_LIMIT_MAX_REQUESTS = 10  # max requests per window
 
 # Blocked keywords (Vietnamese and English)
 BLOCKED_KEYWORDS = [
@@ -114,21 +114,21 @@ class GuardrailValidator:
         
         # 2. Check message length
         if len(message) < self.min_message_length:
-            return False, "❌ Tin nhắn quá ngắn. Vui lòng nhập câu hỏi của bạn."
+            return False, "Tin nhắn quá ngắn. Vui lòng nhập câu hỏi của bạn."
         
         if len(message) > self.max_message_length:
-            return False, f"❌ Tin nhắn quá dài (giới hạn {self.max_message_length} ký tự). Vui lòng rút ngắn câu hỏi."
+            return False, f"Tin nhắn quá dài (giới hạn {self.max_message_length} ký tự). Vui lòng rút ngắn câu hỏi."
         
         # 3. Check for blocked keywords (prompt injection)
         has_blocked, keyword = self._check_blocked_keywords(message)
         if has_blocked:
             log.warning("Blocked keyword detected", user_id=user_id, keyword=keyword)
-            return False, "⚠️ Tin nhắn của bạn chứa nội dung không phù hợp. Vui lòng hỏi về UIT."
+            return False, "Tin nhắn của bạn chứa nội dung không phù hợp. Vui lòng hỏi về UEH."
         
         # 4. Check for excessive special characters (spam detection)
         if self._is_spam(message):
             log.warning("Spam detected", user_id=user_id)
-            return False, "⚠️ Tin nhắn của bạn có vẻ không hợp lệ. Vui lòng gửi câu hỏi thực tế."
+            return False, "Tin nhắn của bạn có vẻ không hợp lệ. Vui lòng gửi câu hỏi thực tế."
         
         return True, None
     
@@ -195,10 +195,10 @@ class GuardrailValidator:
         # 2. Redact any PII that might have leaked
         response = self._redact_pii(response)
         
-        # 3. Check if response is on-topic (UIT related)
+        # 3. Check if response is on-topic (UEH related)
         # This is a simple check - can be enhanced
         if len(response) < 20:
-            return False, "Xin lỗi, tôi không thể tạo câu trả lời phù hợp. Vui lòng hỏi về UIT."
+            return False, "Xin lỗi, tôi không thể tạo câu trả lời phù hợp. Vui lòng hỏi về UEH."
         
         return True, response
     
@@ -296,7 +296,7 @@ class BedrockGuardrails:
                     prompt_preview=prompt[:100]
                 )
                 
-                return False, "⚠️ Tin nhắn của bạn vi phạm chính sách sử dụng. Vui lòng hỏi về UIT một cách lịch sự.", intervention_type
+                return False, "Tin nhắn của bạn vi phạm chính sách sử dụng. Vui lòng hỏi về UEH một cách lịch sự.", intervention_type
             
             return True, prompt, None
             

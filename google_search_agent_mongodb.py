@@ -1,6 +1,6 @@
 """
 Google Search Agent with MongoDB Knowledge Base
-Updated to use MongoDB instead of DynamoDB for UIT admission data
+Updated to use MongoDB for UEH (University of Economics Ho Chi Minh City) admission data
 """
 
 import os
@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from uit_knowledge_base_mongodb import UITMongoKnowledgeBase
+from ueh_knowledge_base_mongodb import UEHMongoKnowledgeBase
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,30 +33,33 @@ CACHE_TTL = 3600  # 1 hour cache
 RESPONSE_CACHE = {}
 RESPONSE_CACHE_MAX_SIZE = 100
 
-# Initialize UIT MongoDB Knowledge Base
+# Initialize UEH MongoDB Knowledge Base with vector search
 try:
-    uit_kb = UITMongoKnowledgeBase(
-        mongodb_uri=os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+    ueh_kb = UEHMongoKnowledgeBase(
+        mongodb_uri=os.getenv('MONGODB_URI', 'mongodb://localhost:27017/'),
+        database_name=os.getenv('MONGODB_DATABASE', 'ueh_knowledge_base'),
+        enable_vector_search=True
     )
-    log.info("UIT MongoDB Knowledge Base initialized")
+    log.info("UEH MongoDB Knowledge Base initialized with vector search")
 except Exception as e:
-    log.error("Failed to initialize UIT MongoDB KB", error=str(e))
-    uit_kb = None
+    log.error("Failed to initialize UEH MongoDB KB", error=str(e))
+    ueh_kb = None
 
 
 @tool
-def search_uit_knowledge(query: str) -> str:
+def search_ueh_knowledge(query: str) -> str:
     """
-    Search the UIT (University of Information Technology) knowledge base for admission information.
-    This should be the FIRST tool used for any UIT-related queries about admission, programs, or tuition.
+    Search the UEH (University of Economics Ho Chi Minh City) knowledge base for admission information.
+    This should be the FIRST tool used for any UEH-related queries about admission, programs, or tuition.
+    Uses semantic vector search for better understanding of user intent.
     
     Args:
-        query: Search query in Vietnamese or English about UIT admission, programs, fees, etc.
+        query: Search query in Vietnamese or English about UEH admission, programs, fees, etc.
     
     Returns:
-        Relevant information from UIT knowledge base, or message if not found
+        Relevant information from UEH knowledge base, or message if not found
     """
-    if not uit_kb:
+    if not ueh_kb:
         return "Knowledge base not available. Please search online."
     
     # Check cache first
@@ -68,25 +71,37 @@ def search_uit_knowledge(query: str) -> str:
             return cached_data['result']
     
     try:
-        log.info("Searching UIT knowledge base", query=query, search_type="full_text")
+        log.info("Searching UEH knowledge base", query=query, search_type="hybrid_vector_text")
         
-        # Use MongoDB full-text search with reduced limit for faster response
-        results = uit_kb.full_text_search(query, limit=3)
+        # Use hybrid search (vector + text) for best results
+        # Increased limit to 15 to ensure comprehensive coverage including specific campus information
+        results = ueh_kb.hybrid_search(query, limit=15)
         
         if not results:
-            return f"No information found in UIT knowledge base for: {query}. Please search online for the latest information."
+            # Fallback to pure vector search with lower threshold
+            log.info("Hybrid search returned no results, trying pure vector search", query=query)
+            results = ueh_kb.vector_search(query, limit=15, similarity_threshold=0.3)
+        
+        if not results:
+            return f"No information found in UEH knowledge base for: {query}. Please search online for the latest information."
         
         # Format results - optimized for speed
-        response = "Thông tin từ cơ sở dữ liệu UIT:\n\n"
+        response = "Thông tin từ Trường Đại học Kinh tế TP.HCM (UEH):\n\n"
         
         for i, item in enumerate(results, 1):
             response += f"{i}. {item['title']}\n"
             response += f"   URL: {item['url']}\n"
             
-            # Include relevant content snippet - reduced to 400 chars for faster processing
+            # Show relevance score if available
+            if 'combined_score' in item:
+                response += f"   Độ liên quan: {item['combined_score']:.2f}\n"
+            elif 'similarity_score' in item:
+                response += f"   Độ tương đồng: {item['similarity_score']:.2f}\n"
+            
+            # Include relevant content snippet - increased to 2000 chars for comprehensive information
             content = item['content']
-            if len(content) > 400:
-                content = content[:400] + "..."
+            if len(content) > 2000:
+                content = content[:2000] + "..."
             response += f"   Nội dung: {content}\n\n"
         
         # Cache the result for future queries
@@ -99,14 +114,14 @@ def search_uit_knowledge(query: str) -> str:
         return response
         
     except Exception as e:
-        log.error("Error searching UIT knowledge base", error=str(e))
+        log.error("Error searching UEH knowledge base", error=str(e))
         return f"Error searching knowledge base: {e}. Please try online search."
 
 
 @tool
 def google_search_serper(query: str, num_results: int = 10) -> str:
     """
-    Search Google using Serper API for general queries or when UIT KB doesn't have the answer.
+    Search Google using Serper API for general queries or when UEH KB doesn't have the answer.
     
     Args:
         query: The search query
@@ -261,7 +276,7 @@ def analyze_search_results(query: str, results: str) -> str:
 
 
 class GoogleSearchAgent:
-    """Google Search Agent with AWS Bedrock and UIT MongoDB Knowledge Base"""
+    """Google Search Agent with AWS Bedrock and UEH MongoDB Knowledge Base"""
     
     def __init__(
         self,
@@ -281,14 +296,14 @@ class GoogleSearchAgent:
         self.agent = Agent(
             model=self.model_id,
             tools=[
-                search_uit_knowledge,
+                search_ueh_knowledge,
                 google_search_serper,
                 google_search_tavily,
                 extract_web_content,
                 analyze_search_results
             ],
             name="GoogleSearchAgent_MongoDB",
-            description="AI agent with Google search and UIT MongoDB knowledge base. For UIT queries, searches knowledge base FIRST before web search."
+            description="AI agent with Google search and UEH MongoDB knowledge base. For UEH (University of Economics Ho Chi Minh City) queries, searches knowledge base FIRST before web search."
         )
         
         log.info(
@@ -350,7 +365,7 @@ def main():
     print("Google Search Agent with MongoDB Knowledge Base")
     print("=" * 60)
     print("\nTest queries:")
-    print("1. UIT có bao nhiêu phương thức tuyển sinh năm 2025?")
+    print("1. UEH có bao nhiêu phương thức tuyển sinh năm 2025?")
     print("2. What are the latest AI developments?")
     print("\nType 'quit' to exit\n")
     

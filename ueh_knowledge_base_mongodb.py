@@ -1,6 +1,6 @@
 """
-MongoDB-based Knowledge Base for UIT Admission Data
-Replaces DynamoDB with MongoDB for better full-text search
+MongoDB-based Knowledge Base for UEH (University of Economics Ho Chi Minh City) Data
+Provides full-text search capabilities for university information
 """
 
 import os
@@ -14,19 +14,22 @@ import time
 from urllib.parse import urljoin, urlparse
 import json
 from dotenv import load_dotenv
+import boto3
+import numpy as np
 
 # Load environment variables from .env file
 load_dotenv()
 
 
-class UITMongoKnowledgeBase:
-    """MongoDB Knowledge Base for UIT data with full-text search"""
+class UEHMongoKnowledgeBase:
+    """MongoDB Knowledge Base for UEH data with full-text search and vector search"""
     
     def __init__(
         self, 
         mongodb_uri: Optional[str] = None,
-        database_name: str = "uit_knowledge_base",
-        collection_name: str = "documents"
+        database_name: str = "ueh_knowledge_base",
+        collection_name: str = "documents",
+        enable_vector_search: bool = True
     ):
         """
         Initialize MongoDB connection
@@ -35,10 +38,12 @@ class UITMongoKnowledgeBase:
             mongodb_uri: MongoDB connection string. If None, uses environment variable MONGODB_URI
             database_name: Name of the database
             collection_name: Name of the collection
+            enable_vector_search: Enable vector search with AWS Bedrock embeddings
         """
         self.mongodb_uri = mongodb_uri or os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
         self.database_name = database_name
         self.collection_name = collection_name
+        self.enable_vector_search = enable_vector_search
         
         try:
             self.client = MongoClient(self.mongodb_uri, serverSelectionTimeoutMS=5000)
@@ -46,10 +51,26 @@ class UITMongoKnowledgeBase:
             self.client.server_info()
             self.db = self.client[database_name]
             self.collection = self.db[collection_name]
-            print(f"✓ Connected to MongoDB: {database_name}.{collection_name}")
+            print(f"Connected to MongoDB: {database_name}.{collection_name}")
         except Exception as e:
-            print(f"✗ Failed to connect to MongoDB: {e}")
+            print(f"Failed to connect to MongoDB: {e}")
             raise
+        
+        # Initialize Bedrock client for vector search
+        if self.enable_vector_search:
+            try:
+                aws_profile = os.getenv('AWS_PROFILE', 'david_gapv')
+                aws_region = os.getenv('AWS_REGION', 'us-west-2')
+                session = boto3.Session(profile_name=aws_profile)
+                self.bedrock_runtime = session.client(
+                    service_name='bedrock-runtime',
+                    region_name=aws_region
+                )
+                self.embedding_model = 'amazon.titan-embed-text-v2:0'
+                self.embedding_dimension = 1024
+            except Exception as e:
+                print(f"Warning: Could not initialize Bedrock for vector search: {e}")
+                self.enable_vector_search = False
     
     def setup_indexes(self):
         """Create indexes for better search performance"""
@@ -74,7 +95,7 @@ class UITMongoKnowledgeBase:
             self.collection.create_index([("url", ASCENDING)], name="url_index", unique=True)
             self.collection.create_index([("content_id", ASCENDING)], name="content_id_index", unique=True)
             
-            print("✓ Indexes created successfully")
+            print("Indexes created successfully")
         except Exception as e:
             print(f"Note: Indexes may already exist: {e}")
     
@@ -126,6 +147,7 @@ class UITMongoKnowledgeBase:
             documents = []
             for doc in results:
                 doc.pop('_id', None)  # Remove MongoDB ObjectId
+                doc.pop('embedding', None)  # Remove embedding vector
                 doc.pop('score', None)  # Remove search score
                 documents.append(doc)
             
@@ -133,6 +155,148 @@ class UITMongoKnowledgeBase:
         except Exception as e:
             print(f"Full-text search error: {e}")
             return []
+    
+    def generate_embedding(self, text: str) -> Optional[List[float]]:
+        """Generate embedding for query text using AWS Bedrock"""
+        if not self.enable_vector_search:
+            return None
+        
+        try:
+            # Truncate text if too long
+            max_chars = 8192 * 4
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            
+            response = self.bedrock_runtime.invoke_model(
+                modelId=self.embedding_model,
+                contentType='application/json',
+                accept='application/json',
+                body=json.dumps({
+                    'inputText': text,
+                    'dimensions': self.embedding_dimension,
+                    'normalize': True
+                })
+            )
+            
+            response_body = json.loads(response['body'].read())
+            embedding = response_body.get('embedding', [])
+            
+            return embedding if embedding else None
+            
+        except Exception as e:
+            print(f"Error generating embedding: {e}")
+            return None
+    
+    def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        try:
+            vec1_np = np.array(vec1)
+            vec2_np = np.array(vec2)
+            
+            dot_product = np.dot(vec1_np, vec2_np)
+            norm1 = np.linalg.norm(vec1_np)
+            norm2 = np.linalg.norm(vec2_np)
+            
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            
+            return float(dot_product / (norm1 * norm2))
+        except Exception as e:
+            print(f"Error calculating similarity: {e}")
+            return 0.0
+    
+    def vector_search(self, query: str, limit: int = 10, similarity_threshold: float = 0.5) -> List[Dict[str, Any]]:
+        """
+        Perform vector similarity search
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+            similarity_threshold: Minimum similarity score (0-1)
+        
+        Returns:
+            List of matching documents sorted by similarity
+        """
+        if not self.enable_vector_search:
+            print("Vector search not enabled, falling back to text search")
+            return self.full_text_search(query, limit)
+        
+        try:
+            # Generate query embedding
+            query_embedding = self.generate_embedding(query)
+            if not query_embedding:
+                print("Could not generate query embedding, falling back to text search")
+                return self.full_text_search(query, limit)
+            
+            # Get all documents with embeddings
+            documents = list(self.collection.find({'embedding': {'$exists': True}}))
+            
+            # Calculate similarity scores
+            results = []
+            for doc in documents:
+                if 'embedding' in doc and doc['embedding']:
+                    similarity = self.cosine_similarity(query_embedding, doc['embedding'])
+                    
+                    if similarity >= similarity_threshold:
+                        doc.pop('_id', None)
+                        doc.pop('embedding', None)
+                        doc['similarity_score'] = similarity
+                        results.append(doc)
+            
+            # Sort by similarity and return top results
+            results.sort(key=lambda x: x['similarity_score'], reverse=True)
+            return results[:limit]
+            
+        except Exception as e:
+            print(f"Vector search error: {e}, falling back to text search")
+            return self.full_text_search(query, limit)
+    
+    def hybrid_search(self, query: str, limit: int = 10, text_weight: float = 0.3, vector_weight: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid search combining text and vector search
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+            text_weight: Weight for text search score (0-1)
+            vector_weight: Weight for vector search score (0-1)
+        
+        Returns:
+            List of matching documents with combined scores
+        """
+        if not self.enable_vector_search:
+            return self.full_text_search(query, limit)
+        
+        try:
+            # Get text search results
+            text_results = self.full_text_search(query, limit * 2)
+            text_scores = {doc.get('url', doc.get('content_id', '')): 1.0 / (i + 1) for i, doc in enumerate(text_results)}
+            
+            # Get vector search results
+            vector_results = self.vector_search(query, limit * 2, similarity_threshold=0.3)
+            vector_scores = {doc.get('url', doc.get('content_id', '')): doc.get('similarity_score', 0) for doc in vector_results}
+            
+            # Combine results
+            all_docs = {doc.get('url', doc.get('content_id', '')): doc for doc in text_results + vector_results}
+            
+            # Calculate combined scores
+            combined_results = []
+            for doc_id, doc in all_docs.items():
+                text_score = text_scores.get(doc_id, 0)
+                vector_score = vector_scores.get(doc_id, 0)
+                combined_score = (text_weight * text_score) + (vector_weight * vector_score)
+                
+                doc['combined_score'] = combined_score
+                doc.pop('similarity_score', None)
+                combined_results.append(doc)
+            
+            # Sort by combined score
+            combined_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            return combined_results[:limit]
+            
+        except Exception as e:
+            print(f"Hybrid search error: {e}, falling back to text search")
+            return self.full_text_search(query, limit)
     
     def search_by_category(self, category: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search documents by category"""
@@ -202,11 +366,11 @@ class UITMongoKnowledgeBase:
     def clear_all(self):
         """Clear all documents (use with caution!)"""
         self.collection.delete_many({})
-        print("✓ All documents cleared")
+        print("All documents cleared")
 
 
-class UITScraper:
-    """Scraper for UIT admission website - same as before"""
+# Quick setup script
+def setup_mongodb_knowledge_base():
     
     def __init__(self, base_url: str = "https://tuyensinh.uit.edu.vn"):
         self.base_url = base_url
@@ -362,7 +526,7 @@ Liên hệ:
     }
     
     kb.add_document(admission_info)
-    print("✓ Added admission methods document")
+    print("Added admission methods document")
     
     # Test search
     print("\n" + "=" * 60)
@@ -374,8 +538,8 @@ Liên hệ:
     for doc in results[:3]:
         print(f"  - {doc['title']}")
     
-    print(f"\n✓ Total documents in KB: {kb.count_documents()}")
-    print("\n✓ Setup completed!")
+    print(f"\nTotal documents in KB: {kb.count_documents()}")
+    print("\nSetup completed!")
 
 
 if __name__ == '__main__':
