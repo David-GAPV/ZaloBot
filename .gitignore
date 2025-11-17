@@ -24,7 +24,7 @@ ENV/
 .aws/
 *.pem
 *.key
-.archive
+.archive/
 # Logs
 *.log
 /tmp/
