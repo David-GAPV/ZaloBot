@@ -114,18 +114,15 @@ python3 -c "import boto3; boto3.Session(profile_name='<YOUR_PROFILE>', region_na
 
 ## 💰 EC2 Cost Information (us-west-2)
 
-### Running Instances
+### Running Instance
 
 | Instance Name | ID | Type | vCPU | RAM | Cost/Hour | Cost/Month | Cost/Day |
 |---------------|-------|------|------|-----|-----------|------------|----------|
 | **zalo-bot-t4g** | i-XXXXXXXXXXXXXXXXX | t4g.large | 2 | 8 GB | $0.0672 | **$49.06** | $1.61 |
-| **MongoDB-Server** | i-XXXXXXXXXXXXXXXXX | t3a.micro | 2 | 1 GB | $0.0094 | **$6.86*** | $0.23 |
-| **TOTAL** | | | | | | **$55.92** | **$1.84** |
 
-
-**Monthly cost breakdown:**
-- t4g.large (zalo-bot): $49.06 (87.7%)
-- t3a.micro (MongoDB): $6.86 (12.3%)
+**Notes:**
+- MongoDB runs via Docker (MongoDB Atlas Local) on the same t4g.large instance
+- No separate database server needed
 
 ---
 
@@ -208,14 +205,15 @@ aws ec2 describe-instances \
 **What happens after EC2 restart:**
 1. Instance boots up (~1-2 minutes)
 2. Network initializes
-3. **Systemd automatically starts zalo-bot service**
-4. Service loads environment from `.env`
-5. Connects to AWS Bedrock
-6. Connects to MongoDB
-7. Flask server starts on port 5000
-8. Ready to handle webhooks!
+3. Docker starts MongoDB Atlas Local container automatically
+4. **Systemd automatically starts zalo-bot service**
+5. Service loads environment from `.env`
+6. Connects to AWS Bedrock
+7. Connects to MongoDB (localhost:27017)
+8. Flask server starts on port 5000
+9. Ready to handle webhooks!
 
-📖 **See `EC2_MANAGEMENT.md` for detailed instructions**
+📖 **Note**: MongoDB runs in Docker on the same instance - no separate database server
 
 ---
 
@@ -807,6 +805,12 @@ print('✓ AWS Bedrock OK')
 ### MongoDB Connection Issues
 
 ```bash
+# Check if MongoDB Docker container is running
+docker ps | grep mongodb-atlas-local
+
+# If not running, start it
+docker run -d -p 27017:27017 mongodb/mongodb-atlas-local
+
 # Test MongoDB connection
 python3 -c "
 from pymongo import MongoClient
@@ -815,9 +819,6 @@ client = MongoClient(uri, serverSelectionTimeoutMS=5000)
 client.server_info()
 print('MongoDB OK')
 "
-
-# Check if MongoDB container is running
-docker ps | grep mongodb-atlas-local
 
 # View MongoDB container logs
 docker logs $(docker ps -q --filter ancestor=mongodb/mongodb-atlas-local)
@@ -832,7 +833,7 @@ docker restart $(docker ps -q --filter ancestor=mongodb/mongodb-atlas-local)
 |-------|----------|
 | Port 5000 in use | Run `./restart.sh` |
 | AWS credentials not found | Check `~/.aws/credentials` has profile configured |
-| MongoDB connection failed | Verify MongoDB EC2 instance is running |
+| MongoDB connection failed | Check Docker container: `docker ps \| grep mongodb` |
 | Bedrock permission denied | Verify AWS credentials have `bedrock:InvokeModel` |
 | Service doesn't auto-start | Check `sudo systemctl is-enabled zalo-bot` |
 
@@ -1044,8 +1045,8 @@ python3 test_system.py
 ---
 
 **Instance Information:**
-- **EC2**: Instance running Zalo Bot + MongoDB Atlas Local (Docker)
-- **MongoDB**: 261 documents with 1024-dim vector embeddings
+- **EC2**: Single t4g.large instance running Zalo Bot + MongoDB Atlas Local (Docker)
+- **MongoDB**: Docker container on localhost:27017 with 261 documents + 1024-dim vector embeddings
 - **Search**: Hybrid (70% semantic vector + 30% text)
 - **Embeddings**: Amazon Titan Embed Text v2
 - **Region**: us-west-2
