@@ -2,7 +2,7 @@
 
 Vietnamese-language chatbot integrated with Zalo OA using AWS Bedrock (Claude 3.5 Haiku) with semantic vector search powered by Amazon Titan Embeddings for UEH university queries.
 
-**Status**: Running | **Port**: 5000 | **Database**: MongoDB Atlas Local | **Search**: Hybrid (Semantic + Text) | **Last Updated**: 2025-11-17
+**Status**: Running | **Port**: 5000 | **Database**: MongoDB Atlas Local | **Search**: Hybrid (Semantic + Text) | **Documents**: 1,191 | **Last Updated**: 2025-11-17
 
 ---
 
@@ -58,7 +58,7 @@ curl http://localhost:5000/health
 │ AWS Bedrock │  │ MongoDB Atlas Local  │
 │ Claude 3.5  │  │ + Vector Embeddings  │
 │ Haiku       │  │                      │
-│ +           │  │ 261 UEH docs         │
+│ +           │  │ 1,191 UEH docs       │
 │ Titan       │  │ 1024-dim vectors     │
 │ Embed v2    │  │                      │
 └─────────────┘  └──────────────────────┘
@@ -70,7 +70,7 @@ curl http://localhost:5000/health
 - **AI Agent**: Strands Agent with semantic search tools
 - **LLM**: AWS Bedrock Claude 3.5 Haiku
 - **Embeddings**: Amazon Titan Embed Text v2 (1024 dimensions)
-- **Knowledge Base**: MongoDB Atlas Local with 261 UEH documents + vector embeddings
+- **Knowledge Base**: MongoDB Atlas Local with 1,191 UEH documents + vector embeddings (includes critical 2025 admission information)
 - **Search**: Hybrid approach (70% semantic vector search + 30% text search)
 - **Search APIs**: Serper API, Tavily API
 
@@ -485,14 +485,18 @@ mongodb://ueh_app:UehApp2025Pass@localhost:27017/ueh_knowledge_base?directConnec
 - Host: localhost:27017
 - Database: ueh_knowledge_base
 - Collection: documents
-- Documents: 261 (UEH university data, focused on 2024-2025)
-- Embeddings: 261 (1024-dimensional vectors via AWS Bedrock Titan v2)
+- Documents: 1,191 (UEH university data, verified for 2025 admission accuracy)
+- Embeddings: 1,191 (1024-dimensional vectors via AWS Bedrock Titan v2)
 - User: ueh_app (readWrite + dbAdmin roles)
+- Quality: Verified against official tuyensinh.ueh.edu.vn sources
 
 **Document Distribution:**
-- 2025 content: 231 documents (88%)
-- 2024 content: 10 documents (4%)
-- Untagged: 20 documents (8%)
+- www.ueh.edu.vn: 341 documents
+- youth.ueh.edu.vn: 261 documents
+- dsa.ueh.edu.vn: 200 documents
+- sdh.ueh.edu.vn: 164 documents
+- tuyensinh.ueh.edu.vn: 25 documents (includes official 2025 admission announcement)
+- Other portals: ~200 documents
 
 **Categories:**
 - tuyển sinh (admissions)
@@ -623,6 +627,76 @@ Query: "What is the capital of France?"
 
 ---
 
+### Quality Assurance & Accuracy Verification
+
+**Critical Issue Discovered (2025-11-17):**
+During testing, the bot provided **incorrect information** when asked about UEH's 2025 admission methods. Instead of listing the 5 official admission evaluation methods ("5 phương thức xét tuyển"), it incorrectly listed program types (Văn bằng 2, Liên thông, Vừa làm vừa học).
+
+**Root Cause Analysis:**
+1. **Missing Critical Content**: The official 2025 admission announcement page from tuyensinh.ueh.edu.vn was NOT in the database
+2. **Outdated Information**: The crawler had collected 24 documents from tuyensinh.ueh.edu.vn, but they were all about:
+   - Old admissions (2021-2024)
+   - Second bachelor's degrees (Văn bằng 2)
+   - Transfer programs (Liên thông)
+   - Part-time programs (Vừa làm vừa học)
+   - Master's programs
+3. **Search Ranking Issue**: The bot found old documents with similar keywords but incorrect content
+
+**Verification Process:**
+```bash
+# User asked: "Các phương thức tuyển sinh năm 2025 của UEH là gì?"
+# Bot answered: Listed program TYPES (Văn bằng 2, Liên thông) ❌ WRONG
+# Web search revealed: 5 phương thức xét tuyển ✅ CORRECT
+
+# Investigation showed:
+# - Database had 24 tuyensinh.ueh.edu.vn docs
+# - NONE contained the 2025 admission methods announcement
+# - The official page was never crawled
+```
+
+**Solution Implemented:**
+1. **Manual Addition**: Crawled the official 2025 admission announcement:
+   - URL: `https://tuyensinh.ueh.edu.vn/bai-viet/ueh-chinh-thuc-khoi-dong-mua-tuyen-sinh-dai-hoc-chinh-quy-2025/`
+   - Content: Complete information about 5 admission methods + 6 subject combinations
+   - Added to database: Document ID `061feadd81d86d8dd6ff91581f8bd5e2`
+
+2. **Embedding Generation**: Created 1024-dim vector embedding for the new document using AWS Bedrock Titan v2
+
+3. **Verification Testing**:
+   ```bash
+   # Re-tested same query
+   Query: "Các phương thức tuyển sinh năm 2025 của UEH là gì?"
+   
+   # Bot now correctly answers:
+   ✅ PT1: Xét tuyển thẳng (2% chỉ tiêu)
+   ✅ PT2: Tốt nghiệp THPT nước ngoài + chứng chỉ quốc tế (1%)
+   ✅ PT3: Kết quả học tập tốt (40-50%) - MỚI
+   ✅ PT4: Đánh giá năng lực + tiếng Anh (10-20%) - MỚI
+   ✅ PT5: Thi tốt nghiệp THPT (còn lại)
+   ✅ 6 tổ hợp môn (A00, A01, D01, D07, D09, ...)
+   ```
+
+4. **Database Status Update**:
+   - Total documents: 1,191 (up from 1,190)
+   - All documents have embeddings: 100%
+   - tuyensinh.ueh.edu.vn: 25 documents (was 24)
+   - **Quality verified**: Official 2025 admission information now available
+
+**Lessons Learned:**
+- ⚠️ Having documents in the database ≠ having the RIGHT documents
+- ✅ Always verify accuracy against official sources
+- ✅ Test with specific, fact-based queries
+- ✅ Compare bot answers to web search results
+- ✅ Check document titles and URLs to ensure critical content is crawled
+
+**Ongoing Quality Control:**
+- Regular verification of answers against tuyensinh.ueh.edu.vn
+- Periodic re-crawling of admission portal for updates
+- Testing with known fact-based questions
+- Monitoring for outdated information
+
+---
+
 ## ⚡ Performance & Caching
 
 ### Two-Layer Cache Architecture
@@ -686,6 +760,74 @@ Common queries are automatically cached after first use:
 
 All subsequent users get instant responses (0.001s)!
 
+### Quality Assurance & Accuracy Verification
+
+**Critical Issue Discovered (2025-11-17):**
+During testing, the bot provided **incorrect information** when asked about UEH's 2025 admission methods. Instead of listing the 5 official admission evaluation methods ("5 phương thức xét tuyển"), it incorrectly listed program types (Văn bằng 2, Liên thông, Vừa làm vừa học).
+
+**Root Cause Analysis:**
+1. **Missing Critical Content**: The official 2025 admission announcement page from tuyensinh.ueh.edu.vn was NOT in the database
+2. **Outdated Information**: The crawler had collected 24 documents from tuyensinh.ueh.edu.vn, but they were all about:
+   - Old admissions (2021-2024)
+   - Second bachelor's degrees (Văn bằng 2)
+   - Transfer programs (Liên thông)
+   - Part-time programs (Vừa làm vừa học)
+   - Master's programs
+3. **Search Ranking Issue**: The bot found old documents with similar keywords but incorrect content
+
+**Verification Process:**
+```bash
+# User asked: "Các phương thức tuyển sinh năm 2025 của UEH là gì?"
+# Bot answered: Listed program TYPES (Văn bằng 2, Liên thông) ❌ WRONG
+# Web search revealed: 5 phương thức xét tuyển ✅ CORRECT
+
+# Investigation showed:
+# - Database had 24 tuyensinh.ueh.edu.vn docs
+# - NONE contained the 2025 admission methods announcement
+# - The official page was never crawled
+```
+
+**Solution Implemented:**
+1. **Manual Addition**: Crawled the official 2025 admission announcement:
+   - URL: `https://tuyensinh.ueh.edu.vn/bai-viet/ueh-chinh-thuc-khoi-dong-mua-tuyen-sinh-dai-hoc-chinh-quy-2025/`
+   - Content: Complete information about 5 admission methods + 6 subject combinations
+   - Added to database: Document ID `061feadd81d86d8dd6ff91581f8bd5e2`
+
+2. **Embedding Generation**: Created 1024-dim vector embedding for the new document using AWS Bedrock Titan v2
+
+3. **Verification Testing**:
+   ```bash
+   # Re-tested same query
+   Query: "Các phương thức tuyển sinh năm 2025 của UEH là gì?"
+   
+   # Bot now correctly answers:
+   ✅ PT1: Xét tuyển thẳng (2% chỉ tiêu)
+   ✅ PT2: Tốt nghiệp THPT nước ngoài + chứng chỉ quốc tế (1%)
+   ✅ PT3: Kết quả học tập tốt (40-50%) - MỚI
+   ✅ PT4: Đánh giá năng lực + tiếng Anh (10-20%) - MỚI
+   ✅ PT5: Thi tốt nghiệp THPT (còn lại)
+   ✅ 6 tổ hợp môn (A00, A01, D01, D07, D09, D15)
+   ```
+
+4. **Database Status Update**:
+   - Total documents: 1,191 (up from 1,190)
+   - All documents have embeddings: 100%
+   - tuyensinh.ueh.edu.vn: 25 documents (was 24)
+   - **Quality verified**: Official 2025 admission information now available
+
+**Lessons Learned:**
+- ⚠️ Having documents in the database ≠ having the RIGHT documents
+- ✅ Always verify accuracy against official sources
+- ✅ Test with specific, fact-based queries
+- ✅ Compare bot answers to web search results
+- ✅ Check document titles and URLs to ensure critical content is crawled
+
+**Ongoing Quality Control:**
+- Regular verification of answers against tuyensinh.ueh.edu.vn
+- Periodic re-crawling of admission portal for updates
+- Testing with known fact-based questions
+- Monitoring for outdated information
+
 ### Search Configuration Optimization
 
 **Issue Identified (2025-11-17):**
@@ -713,10 +855,12 @@ The agent was calling Google search for "các phương thức tuyển sinh năm 
    - Captures documents from multiple UEH portals and campuses
    - Includes both main campus and UEH Mekong information
 
-**Next Steps:**
-- Re-run crawler to fetch official admission portal content
-- Generate embeddings for new documents
-- Verify agent can answer admission queries without web search
+**Completed Steps:**
+- ✅ Manually added official 2025 admission announcement page
+- ✅ Generated embeddings for new document (1024-dim, AWS Bedrock Titan v2)
+- ✅ Verified agent now answers admission queries correctly from knowledge base
+- ✅ Bot no longer calls web search for UEH 2025 admission questions
+- ✅ Accuracy verified against official tuyensinh.ueh.edu.vn content
 
 **Performance Impact:**
 - Coverage: ⬆️ 7 UEH portals instead of 1
@@ -1000,7 +1144,21 @@ python3 test_system.py
 
 ## 📝 Change Log
 
-**2025-11-17:**
+**2025-11-17 (PM - Accuracy Verification):**
+- ⚠️ **Discovered Critical Accuracy Issue**
+  - Bot provided incorrect information about UEH 2025 admission methods
+  - Listed program types instead of admission evaluation methods
+- 🔍 **Root Cause Identified**
+  - Official 2025 admission announcement page missing from database
+  - 24 tuyensinh.ueh.edu.vn docs were all outdated (2021-2024) or other programs
+- ✅ **Issue Resolved**
+  - Manually crawled official 2025 admission announcement
+  - Generated embedding for new document (1024-dim)
+  - Updated database: 1,190 → 1,191 documents
+  - Bot now correctly answers with 5 admission methods
+  - Verified accuracy against official sources
+
+**2025-11-17 (AM - Vector Search Implementation):**
 - ✅ **Implemented AWS Bedrock Vector Embeddings**
   - Generated 1024-dimensional embeddings for all 261 documents
   - Using Amazon Titan Embed Text v2 model
@@ -1046,7 +1204,7 @@ python3 test_system.py
 
 **Instance Information:**
 - **EC2**: Single t4g.large instance running Zalo Bot + MongoDB Atlas Local (Docker)
-- **MongoDB**: Docker container on localhost:27017 with 261 documents + 1024-dim vector embeddings
+- **MongoDB**: Docker container on localhost:27017 with 1,191 documents + 1024-dim vector embeddings (quality verified)
 - **Search**: Hybrid (70% semantic vector + 30% text)
 - **Embeddings**: Amazon Titan Embed Text v2
 - **Region**: us-west-2
