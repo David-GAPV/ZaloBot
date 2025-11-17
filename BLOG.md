@@ -1,6 +1,6 @@
 # Building a Smart Vietnamese Chatbot for University Admissions: A Technical Deep Dive
 
-Last weekend, I finished building a chatbot for UEH (University of Economics Ho Chi Minh City) that answers student questions about admissions, programs, and campus life. What started as a simple experiment turned into a production system handling real queries in Vietnamese.
+Last weekend, I finished building a chatbot taking data from a university in Ho Chi Minh City that answers student questions about admissions, programs, and campus life. What started as a simple experiment turned into a production system handling real queries in Vietnamese.
 
 Here's what I learned and how you can build something similar.
 
